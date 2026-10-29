@@ -184,12 +184,18 @@ void RuleController::create(const drogon::HttpRequestPtr& req,
     const double threshold = (*body)["threshold"].asDouble();
     const int priority = (*body).get("priority", 50).asInt();
     const bool enabled = (*body).get("enabled", true).asBool();
+    const std::string scenario = (*body).get("scenario", "ALL").asString();
+    const std::string disposalPlan = (*body).get("disposalPlan", "").asString();
+    if (scenario != "ALL" && scenario != "WEEKDAY" && scenario != "WEEKEND") {
+        callback(failed(400, "非法 scenario"));
+        return;
+    }
 
     if (!Database::instance().execParams(
-            "INSERT INTO rule(spot_id,metric,operator,threshold,action,level,priority,status)"
-            " VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO rule(spot_id,metric,operator,threshold,action,level,priority,status,"
+            "scenario,disposal_plan) VALUES(?,?,?,?,?,?,?,?,?,?)",
             {spotId, metric, op, std::to_string(threshold), action, level,
-             std::to_string(priority), enabled ? "1" : "0"})) {
+             std::to_string(priority), enabled ? "1" : "0", scenario, disposalPlan})) {
         callback(failed(500, "规则创建失败"));
         return;
     }
@@ -224,17 +230,24 @@ void RuleController::update(const drogon::HttpRequestPtr& req,
     const double threshold = (*body).get("threshold", toDouble(field(cur, "threshold"))).asDouble();
     const int priority = (*body).get("priority", toInt(field(cur, "priority"), 50)).asInt();
     const bool enabled = (*body).get("enabled", field(cur, "status", "1") == "1").asBool();
+    const std::string scenario = (*body).get("scenario", field(cur, "scenario", "ALL")).asString();
+    const std::string disposalPlan =
+        (*body).get("disposalPlan", field(cur, "disposal_plan")).asString();
 
     if (!isValidMetric(metric) || !isValidOperator(op) || !isValidEventLevel(level)) {
         callback(failed(400, "规则字段非法"));
         return;
     }
+    if (scenario != "ALL" && scenario != "WEEKDAY" && scenario != "WEEKEND") {
+        callback(failed(400, "非法 scenario"));
+        return;
+    }
 
     Database::instance().execParams(
         "UPDATE rule SET spot_id=?, metric=?, operator=?, threshold=?, action=?, level=?,"
-        " priority=?, status=? WHERE id=?",
+        " priority=?, status=?, scenario=?, disposal_plan=? WHERE id=?",
         {spotId, metric, op, std::to_string(threshold), action, level,
-         std::to_string(priority), enabled ? "1" : "0", id});
+         std::to_string(priority), enabled ? "1" : "0", scenario, disposalPlan, id});
 
     auto rows = Database::instance().queryParams("SELECT * FROM rule WHERE id=?", {id});
     callback(ok(ruleToJson(rows[0])));

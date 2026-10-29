@@ -1,0 +1,68 @@
+{
+  "metadata": {
+    "generated_by": "train_tft.py",
+    "note": "C++ 侧推理时必须加载此文件，用相同的 mean/std 做归一化"
+  },
+  "spot_to_id": {
+    "spot_01": 0,
+    "spot_02": 1,
+    "spot_03": 2,
+    "spot_04": 3,
+    "spot_05": 4,
+    "spot_06": 5,
+    "spot_07": 6,
+    "spot_08": 7
+  },
+  "norm_params": {
+    "current_visitors": {
+      "mean": 557.8998553240741,
+      "std": 349.5935430092928
+    },
+    "arrival_rate": {
+      "mean": 9.747519386574075,
+      "std": 17.852436425563887
+    },
+    "departure_rate": {
+      "mean": 9.259047743055557,
+      "std": 18.432648921224256
+    },
+    "utilization": {
+      "mean": 0.28921514178240737,
+      "std": 0.15663836850340082
+    },
+    "season_factor": {
+      "mean": 1.0,
+      "std": 1.0
+    }
+  },
+  "tft_config": {
+    "prediction_horizon": 12,
+    "input_length": 96,
+    "quantiles": [
+      0.1,
+      0.5,
+      0.9
+    ]
+  },
+  "column_names": {
+    "known_categorical": [
+      "month",
+      "dayofweek",
+      "is_weekend"
+    ],
+    "known_continuous": [
+      "season_factor"
+    ],
+    "observed": [
+      "current_visitors",
+      "arrival_rate",
+      "departure_rate",
+      "utilization"
+    ],
+    "target": "current_visitors"
+  },
+  "denormalize_target": {
+    "mean": 557.8998553240741,
+    "std": 349.5935430092928
+  }
+}

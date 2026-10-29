@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS scenic_spot (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     spot_id TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
+    spot_type TEXT NOT NULL DEFAULT 'GENERAL',      -- ENTRANCE/PLAZA/TRAIL/VIEWPOINT/SUMMIT
     instant_capacity INTEGER NOT NULL,
     daily_capacity INTEGER NOT NULL,
     current_visitors INTEGER NOT NULL DEFAULT 0,
@@ -105,6 +106,9 @@ CREATE TABLE IF NOT EXISTS rule (
     action TEXT NOT NULL,
     level TEXT NOT NULL DEFAULT 'WARNING',
     priority INTEGER NOT NULL DEFAULT 50,
+    scenario TEXT NOT NULL DEFAULT 'ALL',            -- ALL / WEEKDAY / WEEKEND
+    applicable_spot_type TEXT NOT NULL DEFAULT 'ALL', -- ALL / ENTRANCE / PLAZA / TRAIL / VIEWPOINT / SUMMIT
+    disposal_plan TEXT,                              -- 处置预案操作步骤（JSON 或文本）
     status INTEGER NOT NULL DEFAULT 1
 );
 
@@ -152,13 +156,47 @@ CREATE TABLE IF NOT EXISTS spot_poi (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_spot_poi ON spot_poi(spot_id, poi_id);
 
--- Hourly visitor forecast for the whole park (user-side home page).
+-- 预测结果缓存表。旧字段（forecast_date, hour, predicted_visitors, predicted_level）
+-- 保留给 UserSideController.refreshForecastIfNeeded() 的全园小时级预测使用；
+-- TFT 新链路写入 spot_id 非空 + granularity=5MIN 的行，引擎统一从此表读取。
 CREATE TABLE IF NOT EXISTS flow_forecast (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     forecast_date TEXT NOT NULL,          -- YYYY-MM-DD
-    hour INTEGER NOT NULL,                -- 0..23
+    hour INTEGER NOT NULL,                -- 0..23（旧链路用）
     predicted_visitors INTEGER NOT NULL,
     predicted_level TEXT NOT NULL,        -- congestion level of the whole park
+    spot_id TEXT,                          -- NULL = 全园聚合；非空 = per-spot
+    granularity TEXT NOT NULL DEFAULT 'HOURLY',  -- HOURLY / 5MIN
+    tick_offset INTEGER,                   -- 5MIN 粒度下在 hour 内的 offset (0..11)
+    q10 REAL,
+    q50 REAL,
+    q90 REAL,
+    uncertainty_width REAL,                -- (q90-q10)/q50，高不确定预测应降权
     created_at TEXT DEFAULT (datetime('now','localtime'))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_forecast_date_hour ON flow_forecast(forecast_date, hour);
+-- 注意：不要在这里建 (forecast_date, hour) 的唯一索引。TFT 的 5MIN 行会按
+-- (date, hour) 冲突互相覆盖，导致每景点 12 个 tick 只剩 1 行。唯一性改由
+-- idx_forecast_tick(forecast_date, hour, tick_offset, spot_id, granularity) 保证，
+-- 且老库上的历史唯一索引需由 Schema.cpp 的 migrateLegacySchema() 主动 DROP。
+CREATE INDEX IF NOT EXISTS idx_forecast_date_hour ON flow_forecast(forecast_date, hour);
+-- 注意：idx_forecast_spot_time(spot_id, ...) 不能写在这里。
+-- 老库中 flow_forecast 已存在但没有 spot_id 列，CREATE TABLE IF NOT EXISTS 不会补列，
+-- 此处建索引会直接报 "no such column: spot_id"。该索引统一在 Schema.cpp 的
+-- migrateLegacySchema() 里 ALTER TABLE 加列之后再创建。
+
+-- 预测日志：记录每次 TFT 推理的结果与后续真实值，用于偏差追踪与效果评估。
+CREATE TABLE IF NOT EXISTS prediction_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    spot_id TEXT NOT NULL,
+    predict_time TEXT NOT NULL,             -- 预测时间点（被预测的那个 tick 的时间）
+    base_time TEXT,                         -- 本次预测所用的最后一条 flow_record 时间
+    predicted_value REAL NOT NULL,          -- q50 中位数预测
+    q10 REAL,
+    q50 REAL,
+    q90 REAL,
+    actual_value REAL,                      -- 真实值（模拟模式下是 SimulationEngine 输出）
+    deviation_rate REAL,                    -- |actual - predicted_value| / max(predicted_value, 1)
+    uncertainty_width REAL,                 -- (q90-q10)/max(q50, 1)
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_predlog_spot_time ON prediction_log(spot_id, predict_time);

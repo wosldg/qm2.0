@@ -45,6 +45,11 @@ void SimulationEngine::init() {
     m_config.arrivalRate = readConfigDouble("simArrivalRate", 45.0);
     m_config.pattern = readConfigString("simPattern", "PEAK");
     m_config.durationMinutes = static_cast<int>(readConfigDouble("simDurationMinutes", 120.0));
+    // P1-4: 团客模式配置从 system_config 读取（如果有的话）
+    m_config.group.targetSpotId = readConfigString("simGroupTargetSpot", "");
+    m_config.group.burstArrivalRate = readConfigDouble("simGroupBurstRate", 200.0);
+    m_config.group.burstDurationMinutes = static_cast<int>(readConfigDouble("simGroupBurstMin", 10.0));
+    m_config.group.burstDelayMinutes = static_cast<int>(readConfigDouble("simGroupDelayMin", 15.0));
     m_running = false;
     logInfo("simulation engine ready (arrivalRate=" + std::to_string(m_config.arrivalRate) +
             ", pattern=" + m_config.pattern + ")");
@@ -91,6 +96,11 @@ void SimulationEngine::persistConfig() {
     writeConfig("simArrivalRate", std::to_string(cfg.arrivalRate));
     writeConfig("simPattern", cfg.pattern);
     writeConfig("simDurationMinutes", std::to_string(cfg.durationMinutes));
+    // P1-4: 团客配置持久化
+    writeConfig("simGroupTargetSpot", cfg.group.targetSpotId);
+    writeConfig("simGroupBurstRate", std::to_string(cfg.group.burstArrivalRate));
+    writeConfig("simGroupBurstMin", std::to_string(cfg.group.burstDurationMinutes));
+    writeConfig("simGroupDelayMin", std::to_string(cfg.group.burstDelayMinutes));
 }
 
 double SimulationEngine::patternFactor(double progress) const {
@@ -115,6 +125,7 @@ std::vector<SpotState> SimulationEngine::spots() const {
         SpotState s;
         s.spotId = r.count("spot_id") ? r.at("spot_id") : "";
         s.name = r.count("name") ? r.at("name") : "";
+        s.spotType = r.count("spot_type") ? r.at("spot_type") : "GENERAL";
         s.capacity = r.count("instant_capacity") ? std::stoi(r.at("instant_capacity")) : 0;
         s.currentVisitors = r.count("current_visitors") ? std::stoi(r.at("current_visitors")) : 0;
         s.cumulativeVisitors = r.count("cumulative_visitors") ? std::stoi(r.at("cumulative_visitors")) : 0;
@@ -168,10 +179,27 @@ void SimulationEngine::step() {
     const double avgStayMinutes = 25.0;
     ++m_recordCounter;
 
+    // P1-4: 突发团客脉冲是否在当前时间窗口内
+    const bool groupActive =
+        m_config.pattern == "GROUP_PATTERN" &&
+        elapsedMinutes >= m_config.group.burstDelayMinutes &&
+        elapsedMinutes < m_config.group.burstDelayMinutes + m_config.group.burstDurationMinutes;
+
     for (const auto& s : all) {
         const double weight = static_cast<double>(s.capacity) / totalCapacity;
-        const double arrivalPerMin =
+        double arrivalPerMin =
             m_config.arrivalRate * factor * weight * jitter(rng);
+
+        // P1-4: 团客突发脉冲叠加
+        if (groupActive) {
+            bool targetMatch = m_config.group.targetSpotId.empty() ||
+                               m_config.group.targetSpotId == s.spotId;
+            if (targetMatch) {
+                double groupWeight = m_config.group.targetSpotId.empty() ? weight : 1.0;
+                arrivalPerMin += m_config.group.burstArrivalRate * groupWeight;
+            }
+        }
+
         const double departurePerMin =
             static_cast<double>(s.currentVisitors) / avgStayMinutes;
 

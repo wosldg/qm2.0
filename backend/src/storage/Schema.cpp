@@ -3,6 +3,7 @@
 #include "core/Logger.h"
 #include "core/TimeUtil.h"
 #include "model/Enums.h"
+#include "network/Mappers.h"
 #include "storage/Database.h"
 
 #include <cmath>
@@ -37,40 +38,49 @@ inline double toDoubleLocal(const std::string& s, double def = 0) {
 void seedSpots() {
     if (!isEmptyTable("scenic_spot")) return;
     // Real-world points around the Wulingyuan / Wujiayu entrance (Zhangjiajie).
-    // location_x/y stay on the internal 0..100 map grid (derived from the real
-    // coordinates) so walking distances and route planning keep working;
-    // latitude/longitude carry the real values used by the Tianditu map page.
-    struct SpotSeed { const char* id; const char* name; int cap; int daily; int cur; int cum;
+    struct SpotSeed { const char* id; const char* name; const char* type;
+                      int cap; int daily; int cur; int cum;
                       double x; double y; double lat; double lng;
                       const char* open; const char* close; };
     const SpotSeed seeds[] = {
-        {"spot_01", "大氧吧广场", 15000, 60000, 3000, 8200,  67, 100, 29.3539, 110.4695, "07:00", "18:00"},
-        {"spot_02", "金鞭溪入口",  8000, 40000, 5600, 9600,  57,  83, 29.3502, 110.4661, "07:00", "18:00"},
-        {"spot_03", "千里相会",    5000, 20000, 1500, 4300,  43,  60, 29.3454, 110.4613, "07:00", "18:00"},
-        {"spot_04", "闺门迎宾",    6000, 16000, 4800, 5900,  31,  43, 29.3418, 110.4576, "07:00", "18:00"},
-        {"spot_05", "黄石寨入口",  8000, 30000, 2400, 5100,  16,  21, 29.3371, 110.4527, "07:00", "18:30"},
-        {"spot_06", "鹞子寨入口",  3000, 12000,  300, 1500,   0,   0, 29.3326, 110.4473, "07:30", "17:30"},
+        {"spot_01", "大氧吧广场",   "PLAZA",    15000, 60000, 3000, 8200,  67, 100, 29.3539, 110.4695, "07:00", "18:00"},
+        {"spot_02", "金鞭溪入口",  "TRAIL",     8000, 40000, 5600, 9600,  57,  83, 29.3502, 110.4661, "07:00", "18:00"},
+        {"spot_03", "千里相会",    "TRAIL",     5000, 20000, 1500, 4300,  43,  60, 29.3454, 110.4613, "07:00", "18:00"},
+        {"spot_04", "闺门迎宾",    "ENTRANCE",  6000, 16000, 4800, 5900,  31,  43, 29.3418, 110.4576, "07:00", "18:00"},
+        {"spot_05", "黄石寨入口",  "SUMMIT",    8000, 30000, 2400, 5100,  16,  21, 29.3371, 110.4527, "07:00", "18:30"},
+        {"spot_06", "鹞子寨入口",  "VIEWPOINT", 3000, 12000,  300, 1500,   0,   0, 29.3326, 110.4473, "07:30", "17:30"},
     };
     for (const auto& s : seeds) {
         Database::instance().execParams(
-            "INSERT INTO scenic_spot(spot_id,name,instant_capacity,daily_capacity,current_visitors,"
-            "cumulative_visitors,open_time,close_time,location_x,location_y,latitude,longitude,status)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1)",
-            {s.id, s.name, std::to_string(s.cap), std::to_string(s.daily),
+            "INSERT INTO scenic_spot(spot_id,name,spot_type,instant_capacity,daily_capacity,"
+            "current_visitors,cumulative_visitors,open_time,close_time,"
+            "location_x,location_y,latitude,longitude,status)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
+            {s.id, s.name, s.type, std::to_string(s.cap), std::to_string(s.daily),
              std::to_string(s.cur), std::to_string(s.cum),
              s.open, s.close, std::to_string(s.x), std::to_string(s.y),
              std::to_string(s.lat), std::to_string(s.lng)});
     }
-    logInfo("seeded scenic_spot (6 rows, real Zhangjiajie points)");
+    logInfo("seeded scenic_spot (6 rows with spot_type)");
 }
 
 void seedParkings() {
     if (!isEmptyTable("parking_lot")) return;
-    // Only one real parking lot from the reference material: outside the east gate.
-    Database::instance().exec(
-        "INSERT INTO parking_lot(parking_id,name,total_spaces,occupied_spaces,distance_m,latitude,longitude,status)"
-        " VALUES('park_01','东门外部停车场',800,520,180,29.3395,110.4789,1)");
-    logInfo("seeded parking_lot (1 row)");
+    // 近端 + 两个远端停车场。distance_m 是从主入口的步行距离，按此排序做分级引导。
+    const struct { const char* id; const char* name; int total; int occ; int dist; double lat; double lng; }
+    seeds[] = {
+        {"park_01", "东门外部停车场",  800, 520, 180, 29.3395, 110.4789},
+        {"park_02", "南门临时停车场", 1200, 340, 850, 29.3420, 110.4470},
+        {"park_03", "北线生态停车场",  600, 110, 1500, 29.3610, 110.4620},
+    };
+    for (const auto& p : seeds) {
+        Database::instance().execParams(
+            "INSERT INTO parking_lot(parking_id,name,total_spaces,occupied_spaces,distance_m,latitude,longitude,status)"
+            " VALUES(?,?,?,?,?,?,?,1)",
+            {p.id, p.name, std::to_string(p.total), std::to_string(p.occ),
+             std::to_string(p.dist), std::to_string(p.lat), std::to_string(p.lng)});
+    }
+    logInfo("seeded parking_lot (3 rows, graded by distance)");
 }
 
 void seedShuttles() {
@@ -95,25 +105,34 @@ void seedShuttles() {
 
 void seedRules() {
     if (!isEmptyTable("rule")) return;
-    struct R { const char* spot; const char* metric; const char* op; double threshold; const char* action; const char* level; int priority; int enabled; };
+    // scenario: ALL / WEEKDAY / WEEKEND；applicable_spot_type: ALL / ENTRANCE / PLAZA / TRAIL / VIEWPOINT / SUMMIT
+    struct R { const char* spot; const char* metric; const char* op; double threshold;
+               const char* action; const char* level; int priority; int enabled;
+               const char* scenario; const char* spotType; const char* disposal; };
     const R seeds[] = {
-        {"*",       "visitor_ratio", ">=", 0.9,  "触发拥挤告警",             "HIGH",     10, 1},
-        {"*",       "visitor_ratio", ">=", 1.0,  "触发超载告警并生成分流建议","CRITICAL",  1, 1},
-        {"*",       "arrival_rate",  ">",  40,   "关注到达速率异常",         "INFO",     50, 1},
-        {"spot_01", "visitor_ratio", ">=", 0.85, "大氧吧广场提前预警",       "WARNING",  20, 1},
-        {"*",       "parking_free",  "<",  30,   "触发停车引导建议",         "WARNING",  30, 1},
-        {"*",       "shuttle_load",  ">=", 0.95, "触发运力不足告警",         "WARNING",  35, 1},
-        {"spot_05", "visitor_ratio", ">=", 0.95, "黄石寨入口限制进入",       "CRITICAL",  5, 1},
-        {"*",       "arrival_rate",  "<",  5,    "数据异常排查",             "INFO",     60, 0},
+        // ---- 通用规则（工作日+周末都适用）----
+        {"*",       "visitor_ratio", ">=", 0.9,  "触发拥挤告警",             "HIGH",     10, 1, "ALL",   "ALL",       "[\"通知相邻景点分流准备\",\"安排志愿者在分流节点\",\"开启景区广播提示\"]"},
+        {"*",       "visitor_ratio", ">=", 1.0,  "触发超载告警并生成分流建议","CRITICAL",  1, 1, "ALL",   "ALL",       "[\"立即启动入口限流\",\"调派空闲摆渡车增援\",\"通知应急小组\"]"},
+        {"*",       "arrival_rate",  ">",  40,   "关注到达速率异常",         "INFO",     50, 1, "ALL",   "ALL",       ""},
+        {"*",       "parking_free",  "<",  30,   "触发停车引导建议",         "WARNING",  30, 1, "ALL",   "ALL",       "[\"近端停车场引导满员后切换远端\",\"在各入口设置停车指示牌\"]"},
+        {"*",       "shuttle_load",  ">=", 0.95, "触发运力不足告警",         "WARNING",  35, 1, "ALL",   "ALL",       "[\"调派最近空闲环保车前往支援\",\"通知调度中心增开班次\"]"},
+        {"*",       "arrival_rate",  "<",  5,    "数据异常排查",             "INFO",     60, 0, "ALL",   "ALL",       ""},
+        // ---- 周末差异化规则（更严格的阈值）----
+        {"spot_01", "visitor_ratio", ">=", 0.85, "大氧吧广场提前预警（通用）","WARNING",  20, 1, "ALL",   "PLAZA",     "[\"在入口增派引导人员\",\"启动远端停车引导\",\"实时监控到达率\"]"},
+        {"*",       "visitor_ratio", ">=", 0.85, "周末提前拥挤预警",         "WARNING",  25, 1, "WEEKEND","ALL",      "[\"提前 30 分钟通知周边景点\",\"启动景区广播引导\"]"},
+        {"spot_05", "visitor_ratio", ">=", 0.95, "黄石寨入口限制进入",       "CRITICAL",  5, 1, "ALL",   "SUMMIT",    "[\"在入口设置限流栅栏\",\"引导游客改走鹞子寨入口\"]"},
+        {"spot_04", "visitor_ratio", ">=", 0.8,  "入口类景点提前预警",       "WARNING",  22, 1, "ALL",   "ENTRANCE",  "[\"通知相邻景点分流准备\",\"安排志愿者引导\"]"},
     };
     for (const auto& r : seeds) {
         Database::instance().execParams(
-            "INSERT INTO rule(spot_id,metric,operator,threshold,action,level,priority,status)"
-            " VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO rule(spot_id,metric,operator,threshold,action,level,priority,"
+            "scenario,applicable_spot_type,disposal_plan,status)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             {r.spot, r.metric, r.op, std::to_string(r.threshold), r.action, r.level,
-             std::to_string(r.priority), std::to_string(r.enabled)});
+             std::to_string(r.priority), r.scenario, r.spotType, r.disposal,
+             std::to_string(r.enabled)});
     }
-    logInfo("seeded rule (8 rows)");
+    logInfo("seeded rule (10 rows with scenario/disposal_plan)");
 }
 
 // 7 days of 10-minute flow history so charts and statistics have data before
@@ -340,6 +359,97 @@ void seedForecast() {
     logInfo("seeded flow_forecast (24 rows for " + today + ")");
 }
 
+// 对已存在的老数据库做增量迁移（ALTER TABLE ADD COLUMN）。
+// SQLite 的 CREATE TABLE IF NOT EXISTS 不会给已有表加新列，必须显式迁移。
+void migrateLegacySchema() {
+    auto hasColumn = [](const std::string& table, const std::string& col) -> bool {
+        auto rows = Database::instance().query("PRAGMA table_info(" + table + ")");
+        for (const auto& r : rows) {
+            if (field(r, "name") == col) return true;
+        }
+        return false;
+    };
+
+    auto addColumn = [&](const std::string& table, const std::string& colDef) {
+        const auto space = colDef.find(' ');
+        const std::string colName = colDef.substr(0, space);
+        if (hasColumn(table, colName)) return;
+        const std::string sql = "ALTER TABLE " + table + " ADD COLUMN " + colDef;
+        if (Database::instance().exec(sql)) {
+            logInfo("migrate: added " + table + "." + colName);
+        } else {
+            logWarn("migrate: " + Database::instance().lastError());
+        }
+    };
+
+    addColumn("scenic_spot", "spot_type TEXT NOT NULL DEFAULT 'GENERAL'");
+    addColumn("flow_forecast", "spot_id TEXT");
+    addColumn("flow_forecast", "granularity TEXT NOT NULL DEFAULT 'HOURLY'");
+    addColumn("flow_forecast", "tick_offset INTEGER");
+    addColumn("flow_forecast", "q10 REAL");
+    addColumn("flow_forecast", "q50 REAL");
+    addColumn("flow_forecast", "q90 REAL");
+    addColumn("flow_forecast", "uncertainty_width REAL");
+    addColumn("rule", "scenario TEXT NOT NULL DEFAULT 'ALL'");
+    addColumn("rule", "applicable_spot_type TEXT NOT NULL DEFAULT 'ALL'");
+    addColumn("rule", "disposal_plan TEXT");
+
+    // 老库上的 (forecast_date, hour) 唯一索引会让 TFT 的 5MIN 行互相覆盖，
+    // 必须换成包含 spot_id/granularity/tick_offset 的唯一索引。
+    Database::instance().exec("DROP INDEX IF EXISTS idx_forecast_date_hour");
+    Database::instance().exec(
+        "CREATE INDEX IF NOT EXISTS idx_forecast_date_hour ON flow_forecast(forecast_date, hour)");
+    Database::instance().exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_forecast_tick "
+        "ON flow_forecast(forecast_date, hour, tick_offset, spot_id, granularity)");
+    Database::instance().exec(
+        "CREATE INDEX IF NOT EXISTS idx_forecast_spot_time "
+        "ON flow_forecast(spot_id, forecast_date, granularity)");
+    Database::instance().exec(
+        "CREATE INDEX IF NOT EXISTS idx_predlog_spot_time "
+        "ON prediction_log(spot_id, predict_time)");
+}
+
+void backfillSpotTypes() {
+    struct Mapping { const char* keyword; const char* type; };
+    const Mapping mappings[] = {
+        {"门票站", "ENTRANCE"}, {"闸机", "ENTRANCE"}, {"入口", "ENTRANCE"},
+        {"广场", "PLAZA"}, {"中心", "PLAZA"},
+        {"溪", "TRAIL"}, {"相会", "TRAIL"}, {"线路", "TRAIL"},
+        {"观景台", "VIEWPOINT"}, {"观景", "VIEWPOINT"},
+        {"寨", "SUMMIT"}, {"顶", "SUMMIT"},
+    };
+    auto rows = Database::instance().query("SELECT spot_id, name, spot_type FROM scenic_spot");
+    for (const auto& r : rows) {
+        const std::string type = field(r, "spot_type", "");
+        if (!type.empty() && type != "GENERAL") continue;
+        const std::string name = field(r, "name");
+        const std::string spotId = field(r, "spot_id");
+        const char* resolved = "GENERAL";
+        for (const auto& m : mappings) {
+            if (name.find(m.keyword) != std::string::npos) {
+                resolved = m.type;
+                break;
+            }
+        }
+        Database::instance().execParams(
+            "UPDATE scenic_spot SET spot_type=? WHERE spot_id=?",
+            {resolved, spotId});
+    }
+}
+
+void backfillRuleScenarios() {
+    // 给 spot_01 的提前预警规则加周末差异化阈值 + 处置预案示范
+    Database::instance().exec(
+        "UPDATE rule SET scenario='WEEKEND', threshold=0.85, "
+        "disposal_plan='[\"在入口增派引导人员\",\"启动远端停车引导\",\"实时监控到达率\"]' "
+        "WHERE spot_id='spot_01' AND priority=20");
+    // 给通用 visitor_ratio 规则加处置预案
+    Database::instance().exec(
+        "UPDATE rule SET disposal_plan='[\"通知相邻景点分流准备\",\"安排志愿者在分流节点\",\"开启景区广播提示\"]' "
+        "WHERE disposal_plan IS NULL AND spot_id='*' AND metric='visitor_ratio'");
+}
+
 } // namespace
 
 bool Schema::init(const std::string& schemaSqlPath) {
@@ -356,6 +466,9 @@ bool Schema::init(const std::string& schemaSqlPath) {
         return false;
     }
 
+    // 增量迁移：对已存在的老数据库 ALTER TABLE 加新列
+    migrateLegacySchema();
+
     seedSpots();
     seedParkings();
     seedShuttles();
@@ -366,6 +479,11 @@ bool Schema::init(const std::string& schemaSqlPath) {
     seedSuggestions();
     seedPois();
     seedForecast();
+
+    // 回填：对已有 seed 数据的新字段补值
+    backfillSpotTypes();
+    backfillRuleScenarios();
+
     return true;
 }
 

@@ -5,6 +5,7 @@
 #include "core/TimeUtil.h"
 #include "network/Mappers.h"
 #include "pipeline/SimulationEngine.h"
+#include "predict/Predictor.h"
 #include "storage/Database.h"
 
 #include <algorithm>
@@ -40,6 +41,41 @@ const char* eventTypeForMetric(const std::string& metric, double valueRatio) {
     return "CONGESTION";
 }
 
+// 返回当前日期的场景：WEEKDAY / WEEKEND
+std::string currentScenario() {
+    const auto now = std::time(nullptr);
+    const auto tm = toLocalTm(now);
+    // tm_wday: 0=Sunday, 6=Saturday
+    return (tm.tm_wday == 0 || tm.tm_wday == 6) ? "WEEKEND" : "WEEKDAY";
+}
+
+// rule 的 scenario 字段：ALL 总是匹配；WEEKDAY/WEEKEND 只在对应日期匹配
+bool scenarioMatches(const std::string& ruleScenario, const std::string& todayScenario) {
+    return ruleScenario == "ALL" || ruleScenario == todayScenario || ruleScenario.empty();
+}
+
+// rule 的 applicable_spot_type：ALL 匹配所有；具体类型只匹配对应 spot
+bool spotTypeMatches(const std::string& ruleSpotType, const std::string& spotType) {
+    if (ruleSpotType == "ALL" || ruleSpotType.empty()) return true;
+    return ruleSpotType == spotType;
+}
+
+// 给定景点，查最新的 5MIN flow_forecast 预测（TFT 输出）
+// 返回 {预测拥挤度, 不确定度}；没有预测数据时返回 {0, 0}
+std::pair<double, double> latestForecastRatio(const std::string& spotId, int capacity) {
+    // 取最新的 granularity='5MIN' + spot_id 非空的一条
+    auto rows = Database::instance().queryParams(
+        "SELECT q50, uncertainty_width FROM flow_forecast"
+        " WHERE spot_id=? AND granularity='5MIN' AND q50 IS NOT NULL"
+        " ORDER BY created_at DESC, id DESC LIMIT 1",
+        {spotId});
+    if (rows.empty()) return {0.0, 0.0};
+    const double q50 = toDouble(field(rows[0], "q50"));
+    const double uw = toDouble(field(rows[0], "uncertainty_width"));
+    const double ratio = capacity > 0 ? q50 / capacity : 0.0;
+    return {ratio, uw};
+}
+
 } // namespace
 
 RuleEngine& RuleEngine::instance() {
@@ -53,6 +89,11 @@ size_t RuleEngine::activeEventCount() const {
 }
 
 void RuleEngine::evaluate() {
+    const std::string todayScenario = currentScenario();
+    const double uwThreshold = Predictor::instance().isReady()
+                                   ? Predictor::instance().uncertaintyWidthThreshold()
+                                   : 0.3;
+
     auto ruleRows = Database::instance().query(
         "SELECT * FROM rule WHERE status=1 ORDER BY priority, id");
     if (ruleRows.empty()) return;
@@ -92,6 +133,10 @@ void RuleEngine::evaluate() {
     std::set<std::string> hitKeys;
 
     for (const auto& rule : ruleRows) {
+        // ---- P1-1: 场景过滤（工作日/周末）----
+        const std::string ruleScenario = field(rule, "scenario", "ALL");
+        if (!scenarioMatches(ruleScenario, todayScenario)) continue;
+
         const std::string ruleId = field(rule, "id");
         const std::string metric = field(rule, "metric");
         const std::string op = field(rule, "operator");
@@ -99,14 +144,18 @@ void RuleEngine::evaluate() {
         const std::string level = field(rule, "level", "WARNING");
         const std::string action = field(rule, "action");
         const std::string targetSpot = field(rule, "spot_id", "*");
+        const std::string ruleSpotType = field(rule, "applicable_spot_type", "ALL");
+        const std::string disposalPlan = field(rule, "disposal_plan");
 
         if (metric == "parking_free") {
             if (minFree < 0) continue;
             const bool hit = compare(minFree, op, threshold);
-            const std::string desc = minFreeName + "剩余车位 " + std::to_string(minFree) +
-                                     " 个，" + op + " 阈值 " + fmt1(threshold);
+            std::string desc = minFreeName + "剩余车位 " + std::to_string(minFree) +
+                               " 个，" + op + " 阈值 " + fmt1(threshold);
+            if (!disposalPlan.empty()) desc += "｜处置预案：" + disposalPlan;
             evaluateCondition(ruleId, "parking", hit, "PARKING_SHORTAGE", level, "",
-                              desc, "建议引导车辆前往剩余车位最多的停车场", debounce);
+                              desc, disposalPlan.empty() ? "建议引导车辆前往剩余车位最多的停车场" : disposalPlan,
+                              debounce);
             if (hit) hitKeys.insert("PARKING_SHORTAGE:");
             continue;
         }
@@ -114,16 +163,20 @@ void RuleEngine::evaluate() {
         if (metric == "shuttle_load") {
             if (maxShuttleLoad < 0) continue;
             const bool hit = compare(maxShuttleLoad, op, threshold);
-            const std::string desc = maxShuttleName + "满载率 " + fmt1(maxShuttleLoad * 100) +
-                                     "%，" + op + " 阈值 " + fmt1(threshold * 100) + "%";
+            std::string desc = maxShuttleName + "满载率 " + fmt1(maxShuttleLoad * 100) +
+                               "%，" + op + " 阈值 " + fmt1(threshold * 100) + "%";
+            if (!disposalPlan.empty()) desc += "｜处置预案：" + disposalPlan;
             evaluateCondition(ruleId, "shuttle", hit, "CAPACITY_SHORTAGE", level, "",
-                              desc, "建议调派最近空闲摆渡车前往支援", debounce);
+                              desc, disposalPlan.empty() ? "建议调派最近空闲摆渡车前往支援" : disposalPlan,
+                              debounce);
             if (hit) hitKeys.insert("CAPACITY_SHORTAGE:");
             continue;
         }
 
         for (const auto& s : spots) {
             if (targetSpot != "*" && targetSpot != s.spotId) continue;
+            // ---- P1-1: spot_type 过滤 ----
+            if (!spotTypeMatches(ruleSpotType, s.spotType)) continue;
 
             double value = 0.0;
             std::string desc;
@@ -145,9 +198,37 @@ void RuleEngine::evaluate() {
             if (type == "CONGESTION" || type == "OVERLOAD") {
                 suggestion = "建议将部分游客分流至容量充足的景点";
             }
+            if (!disposalPlan.empty()) {
+                desc += "｜处置预案：" + disposalPlan;
+                suggestion = disposalPlan;
+            }
             evaluateCondition(ruleId, s.spotId, hit, type, level, s.spotId, desc, suggestion,
                               debounce);
             if (hit) hitKeys.insert(type + ":" + s.spotId);
+
+            // ---- P0-2 + P0-3: 预测提前预警 ----
+            // 读取 flow_forecast（TFT 输出），如果预测拥挤度超过阈值则提前触发
+            auto [forecastRatio, forecastUw] = latestForecastRatio(s.spotId, s.capacity);
+            if (forecastRatio > 0 && forecastRatio >= threshold && forecastRatio > s.ratio()) {
+                const bool highUw = forecastUw >= uwThreshold;
+                const std::string predType = "PREDICTED_" + type; // PREDICTED_CONGESTION / PREDICTED_OVERLOAD
+                std::string predDesc = s.name + " TFT 预测拥挤度 " + fmt1(forecastRatio * 100) +
+                                       "%（高于当前 " + fmt1(s.ratio() * 100) + "%），"
+                                       + op + " 阈值 " + fmt1(threshold * 100) + "%";
+                if (highUw) {
+                    predDesc += "｜⚠️ 不确定度较高（width_ratio=" + fmt1(forecastUw) + "），"
+                                "建议人工确认后再执行处置";
+                } else {
+                    if (!disposalPlan.empty()) predDesc += "｜处置预案：" + disposalPlan;
+                }
+                const char* predLevel = highUw ? "INFO" : level.c_str();
+                const std::string predSuggestion = highUw
+                    ? "高不确定度预测，暂不自动生成调度建议，请人工确认"
+                    : (disposalPlan.empty() ? "建议提前部署分流" : disposalPlan);
+                evaluateCondition(ruleId + "_pred", s.spotId, true, predType, predLevel,
+                                  s.spotId, predDesc, predSuggestion, debounce);
+                hitKeys.insert(predType + ":" + s.spotId);
+            }
         }
     }
 

@@ -13,12 +13,10 @@ import Overview from '@/views/Overview.vue'
 import Spots from '@/views/Spots.vue'
 import Alerts from '@/views/admin/Alerts.vue'
 import Scheduling from '@/views/admin/Scheduling.vue'
-import Events from '@/views/admin/Events.vue'
 import Statistics from '@/views/admin/Statistics.vue'
 import SpotManage from '@/views/admin/SpotManage.vue'
 import ParkingManage from '@/views/admin/ParkingManage.vue'
 import ShuttleManage from '@/views/admin/ShuttleManage.vue'
-import RouteManage from '@/views/admin/RouteManage.vue'
 import DataEntry from '@/views/admin/DataEntry.vue'
 import Simulation from '@/views/admin/Simulation.vue'
 import Rules from '@/views/admin/Rules.vue'
@@ -53,9 +51,8 @@ const router = createRouter({
       children: [
         { path: 'overview', component: Overview, meta: { title: '景区概览', roles: ADMIN_ROLES } },
         { path: 'flow', component: Spots, meta: { title: '景点流量看板', roles: ADMIN_ROLES } },
-        { path: 'alerts', component: Alerts, meta: { title: '拥堵预警', roles: ADMIN_ROLES } },
+        { path: 'alerts', component: Alerts, meta: { title: '预警中心', roles: ADMIN_ROLES } },
         { path: 'scheduling', component: Scheduling, meta: { title: '调度建议', roles: ADMIN_ROLES } },
-        { path: 'events', component: Events, meta: { title: '事件中心', roles: ADMIN_ROLES } },
         { path: 'statistics', component: Statistics, meta: { title: '数据统计', roles: ADMIN_ROLES } },
         { path: 'spot-manage', component: SpotManage, meta: { title: '景点管理', roles: ADMIN_ROLES } },
         {
@@ -68,17 +65,16 @@ const router = createRouter({
           component: ShuttleManage,
           meta: { title: '摆渡车管理', roles: ADMIN_ROLES },
         },
-        {
-          path: 'resources/routes',
-          component: RouteManage,
-          meta: { title: '摆渡车路线', roles: ADMIN_ROLES },
-        },
         { path: 'entry', component: DataEntry, meta: { title: '数据录入', roles: ['admin'] } },
-        { path: 'simulation', component: Simulation, meta: { title: '模拟配置', roles: ['admin'] } },
-        { path: 'rules', component: Rules, meta: { title: '规则与阈值配置', roles: ['admin'] } },
+        { path: 'rules', component: Rules, meta: { title: '预警阈值配置', roles: ['admin'] } },
         { path: 'users', component: Users, meta: { title: '用户管理', roles: ['admin'] } },
         { path: 'settings', component: Settings, meta: { title: '系统设置', roles: ['admin'] } },
+        // 演示/运维工具页：不进菜单，仅 URL 直达
+        { path: 'simulation', component: Simulation, meta: { title: '模拟配置', roles: ['admin'] } },
         { path: 'monitor', component: SysMonitor, meta: { title: '系统监控', roles: ['admin'] } },
+        // 兼容旧链接
+        { path: 'events', redirect: '/admin/alerts' },
+        { path: 'resources/routes', redirect: '/admin/resources/shuttles' },
       ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/home' },

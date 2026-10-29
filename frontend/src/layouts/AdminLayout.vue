@@ -71,16 +71,13 @@ import {
   TrendCharts,
   Warning,
   Guide,
-  Bell,
   PieChart,
   Location,
   Van,
   EditPen,
-  VideoPlay,
   SetUp,
   User,
   Setting,
-  Monitor,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -99,30 +96,49 @@ interface MenuItem {
 
 const ALL: string[] = ['admin', 'operator']
 
+// 菜单按「监测指挥 / 预警处置 / 资源管理 / 系统配置」四个业务域分组。
+// 模拟配置、系统监控属演示/运维工具，不进菜单，仅 URL 直达（见 router）。
 const menus: MenuItem[] = [
-  { title: '景区概览', path: '/admin/overview', icon: Odometer, roles: ALL },
-  { title: '景点流量看板', path: '/admin/flow', icon: TrendCharts, roles: ALL },
-  { title: '拥堵预警', path: '/admin/alerts', icon: Warning, roles: ALL },
-  { title: '调度建议', path: '/admin/scheduling', icon: Guide, roles: ALL },
-  { title: '事件中心', path: '/admin/events', icon: Bell, roles: ALL },
-  { title: '数据统计', path: '/admin/statistics', icon: PieChart, roles: ALL },
-  { title: '景点管理', path: '/admin/spot-manage', icon: Location, roles: ALL },
+  {
+    title: '监测指挥',
+    icon: Odometer,
+    roles: ALL,
+    children: [
+      { title: '景区概览', path: '/admin/overview', icon: Odometer, roles: ALL },
+      { title: '景点流量看板', path: '/admin/flow', icon: TrendCharts, roles: ALL },
+      { title: '数据统计', path: '/admin/statistics', icon: PieChart, roles: ALL },
+    ],
+  },
+  {
+    title: '预警处置',
+    icon: Warning,
+    roles: ALL,
+    children: [
+      { title: '预警中心', path: '/admin/alerts', icon: Warning, roles: ALL },
+      { title: '调度建议', path: '/admin/scheduling', icon: Guide, roles: ALL },
+    ],
+  },
   {
     title: '资源管理',
     icon: Van,
     roles: ALL,
     children: [
+      { title: '景点管理', path: '/admin/spot-manage', icon: Location, roles: ALL },
       { title: '停车场管理', path: '/admin/resources/parking', icon: Location, roles: ALL },
       { title: '摆渡车管理', path: '/admin/resources/shuttles', icon: Van, roles: ALL },
-      { title: '摆渡车路线', path: '/admin/resources/routes', icon: Guide, roles: ALL },
     ],
   },
-  { title: '数据录入', path: '/admin/entry', icon: EditPen, roles: ['admin'] },
-  { title: '模拟配置', path: '/admin/simulation', icon: VideoPlay, roles: ['admin'] },
-  { title: '规则与阈值配置', path: '/admin/rules', icon: SetUp, roles: ['admin'] },
-  { title: '用户管理', path: '/admin/users', icon: User, roles: ['admin'] },
-  { title: '系统设置', path: '/admin/settings', icon: Setting, roles: ['admin'] },
-  { title: '系统监控', path: '/admin/monitor', icon: Monitor, roles: ['admin'] },
+  {
+    title: '系统配置',
+    icon: Setting,
+    roles: ['admin'],
+    children: [
+      { title: '预警阈值配置', path: '/admin/rules', icon: SetUp, roles: ['admin'] },
+      { title: '数据录入', path: '/admin/entry', icon: EditPen, roles: ['admin'] },
+      { title: '用户管理', path: '/admin/users', icon: User, roles: ['admin'] },
+      { title: '系统设置', path: '/admin/settings', icon: Setting, roles: ['admin'] },
+    ],
+  },
 ]
 
 /** 按当前角色过滤菜单（后端接口黑白名单兜底） */

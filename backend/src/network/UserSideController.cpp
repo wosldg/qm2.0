@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <string>
 #include <vector>
 
+#include "core/Logger.h"
 #include "core/Settings.h"
 #include "core/TimeUtil.h"
 #include "network/ApiResult.h"
@@ -80,17 +82,72 @@ double mapDistance(double x1, double y1, double x2, double y2) {
 }
 
 // Recomputes today's hourly forecast at most once per hour.
-// Baseline: per-hour average of whole-park visitors over the last 7 days of
-// flow_record, corrected by today's actual level so the curve tracks reality.
+// P1-5: 优先使用 TFT 模型的 per-spot 5min 预测聚合为全园小时级；
+//       如果没有 TFT 数据（模型未 ready / 历史不足），降级为 7 天均值方案。
 void refreshForecastIfNeeded() {
     const std::string today = dateStringDaysAgo(0);
     auto rows = Database::instance().queryParams(
-        "SELECT created_at FROM flow_forecast WHERE forecast_date=? ORDER BY id DESC LIMIT 1", {today});
+        "SELECT created_at FROM flow_forecast WHERE forecast_date=? AND spot_id IS NULL"
+        " ORDER BY id DESC LIMIT 1", {today});
     if (!rows.empty()) {
         const long long ageMin = (nowMillis() - parseMillis(field(rows[0], "created_at"))) / 60000;
         if (ageMin < 60) return;
     }
 
+    // ---- 优先尝试 TFT 数据 ----
+    // 取最新的 granularity='5MIN' + spot_id 非空的 per-spot 预测，
+    // 聚合为全园小时级（sum 所有 spot 在该小时的 q50）
+    auto tftRows = Database::instance().queryParams(
+        "SELECT hour, tick_offset, q50 FROM flow_forecast"
+        " WHERE forecast_date=? AND spot_id IS NOT NULL AND spot_id != ''"
+        " AND granularity='5MIN' AND q50 IS NOT NULL"
+        " ORDER BY created_at DESC",
+        {today});
+
+    bool usedTft = false;
+    if (!tftRows.empty()) {
+        // 用 std::map<hour, sum> 聚合
+        std::map<int, int> hourlySum;
+        for (const auto& r : tftRows) {
+            const int h = toInt(field(r, "hour"), -1);
+            if (h < 0 || h > 23) continue;
+            hourlySum[h] += static_cast<int>(std::lround(toDouble(field(r, "q50"))));
+        }
+        if (!hourlySum.empty()) {
+            const int totalCapacity = std::max(1, currentSettings().totalCapacity);
+            Database::instance().exec("BEGIN");
+            Database::instance().execParams(
+                "DELETE FROM flow_forecast WHERE forecast_date=? AND spot_id IS NULL"
+                " AND granularity='HOURLY'", {today});
+            for (int h = 0; h < 24; ++h) {
+                int predicted = hourlySum.count(h) ? hourlySum[h] : 0;
+                if (predicted <= 0) {
+                    // TFT 没有覆盖到的小时，用最近有数据的小时值
+                    // 找前后最近的非零值
+                    int fallback = 0;
+                    for (int delta = 1; delta < 24; ++delta) {
+                        if (hourlySum.count(h - delta)) { fallback = hourlySum[h - delta]; break; }
+                        if (hourlySum.count(h + delta)) { fallback = hourlySum[h + delta]; break; }
+                    }
+                    predicted = fallback;
+                }
+                const double ratio = totalCapacity > 0 ? static_cast<double>(predicted) / totalCapacity : 0;
+                Database::instance().execParams(
+                    "INSERT OR REPLACE INTO flow_forecast(forecast_date,hour,predicted_visitors,predicted_level,created_at)"
+                    " VALUES(?,?,?,?,?)",
+                    {today, std::to_string(h), std::to_string(std::max(0, predicted)),
+                     toString(levelFromRatio(ratio)), nowString()});
+            }
+            Database::instance().exec("COMMIT");
+            usedTft = true;
+            logInfo("refreshForecastIfNeeded: used TFT aggregated forecast (" +
+                    std::to_string(hourlySum.size()) + " hours with data)");
+        }
+    }
+
+    if (usedTft) return;
+
+    // ---- 降级：7 天均值方案 ----
     auto daily = Database::instance().query(
         "SELECT substr(record_time,1,13) AS dh, SUM(current_visitors) AS tot FROM flow_record"
         " WHERE is_deleted=0 AND record_time>=datetime('now','-7 days','localtime') GROUP BY dh");
@@ -105,7 +162,6 @@ void refreshForecastIfNeeded() {
         count[h] += 1;
     }
 
-    // Correction factor from today's latest whole-park total (clamped 0.7..1.3).
     const int curHour = toLocalTm(std::time(nullptr)).tm_hour;
     double correction = 1.0;
     auto latest = Database::instance().query(
@@ -119,6 +175,9 @@ void refreshForecastIfNeeded() {
 
     const int totalCapacity = std::max(1, currentSettings().totalCapacity);
     Database::instance().exec("BEGIN");
+    Database::instance().execParams(
+        "DELETE FROM flow_forecast WHERE forecast_date=? AND spot_id IS NULL"
+        " AND granularity='HOURLY'", {today});
     for (int h = 0; h < 24; ++h) {
         const double avg7 = count[h] > 0 ? sum[h] / count[h] : 0.0;
         const int predicted = std::max(0, static_cast<int>(std::lround(avg7 * correction)));

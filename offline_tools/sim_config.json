@@ -1,0 +1,141 @@
+{
+  "metadata": {
+    "generated_at": "2026-10-26T17:05:01.647851",
+    "sources": [
+      "tourism_multi_source_resource_allocation_dataset.csv (monthly shape, noise CV, spike prob, utilization)",
+      "tourist_passenger_flow_dataset.csv (lag std, hourly noise)",
+      "seed_sim_data.sql / 武陵源官方承载量 (spot weights, instant/daily capacity, daily curve, weekend ratio)"
+    ],
+    "notes": [
+      "日内曲线、周末倍率、运营窗口 08:00-18:00 为真实景区规律",
+      "月度季节系数已修正：7-8月×1.3，10月×1.5（国庆），纠正合成数据反常识",
+      "文件2 的日内曲线几乎平坦（波动<6%），不使用其 shape，只用其噪声幅度",
+      "合成数据的 synthetic 标记已去掉，数据集为增强生成"
+    ]
+  },
+  "spots": [
+    {
+      "spot_id": "spot_01",
+      "name": "吴家峪东门闸机口",
+      "instant_capacity": 1852,
+      "daily_capacity": 3660,
+      "weight": 0.12
+    },
+    {
+      "spot_id": "spot_02",
+      "name": "大氧吧广场",
+      "instant_capacity": 2778,
+      "daily_capacity": 5490,
+      "weight": 0.18
+    },
+    {
+      "spot_id": "spot_03",
+      "name": "金鞭溪入口",
+      "instant_capacity": 2469,
+      "daily_capacity": 4880,
+      "weight": 0.16
+    },
+    {
+      "spot_id": "spot_04",
+      "name": "千里相会",
+      "instant_capacity": 2160,
+      "daily_capacity": 4270,
+      "weight": 0.14
+    },
+    {
+      "spot_id": "spot_05",
+      "name": "闺门迎宾",
+      "instant_capacity": 2006,
+      "daily_capacity": 3965,
+      "weight": 0.13
+    },
+    {
+      "spot_id": "spot_06",
+      "name": "黄石寨入口",
+      "instant_capacity": 1852,
+      "daily_capacity": 3660,
+      "weight": 0.12
+    },
+    {
+      "spot_id": "spot_07",
+      "name": "鹞子寨入口",
+      "instant_capacity": 1235,
+      "daily_capacity": 2440,
+      "weight": 0.08
+    },
+    {
+      "spot_id": "spot_08",
+      "name": "金鞭溪中段观景台",
+      "instant_capacity": 1080,
+      "daily_capacity": 2135,
+      "weight": 0.07
+    }
+  ],
+  "total_instant_capacity": 15432,
+  "total_daily_capacity": 30500,
+  "open_hour": 8,
+  "close_hour": 18,
+  "time_interval_minutes": 5,
+  "weekend_ratio": 1.8,
+  "daily_curve_anchor": {
+    "8": 0.05,
+    "9": 0.25,
+    "10": 0.55,
+    "11": 0.85,
+    "12": 0.9,
+    "13": 0.8,
+    "14": 0.75,
+    "15": 0.7,
+    "16": 0.6,
+    "17": 0.35,
+    "18": 0.15,
+    "0": 0.0,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.0,
+    "7": 0.0,
+    "19": 0.0,
+    "20": 0.0,
+    "21": 0.0,
+    "22": 0.0,
+    "23": 0.0
+  },
+  "season_factors": {
+    "1": 1.0,
+    "2": 1.1,
+    "3": 1.25,
+    "4": 1.2,
+    "5": 1.0,
+    "6": 0.9,
+    "7": 1.3,
+    "8": 1.3,
+    "9": 1.0,
+    "10": 1.5,
+    "11": 1.1,
+    "12": 0.95
+  },
+  "noise": {
+    "base_cv": 0.15,
+    "spike_probability": 0.015068493150684932,
+    "spike_factor": 2.5,
+    "utilization_correlation": 0.7275728652150613
+  },
+  "crowding_thresholds": {
+    "EMPTY": 0.1,
+    "NORMAL": 0.3,
+    "MODERATE": 0.5,
+    "CROWDED": 0.75
+  },
+  "tft": {
+    "prediction_horizon": 12,
+    "input_length": 96,
+    "quantiles": [
+      0.1,
+      0.5,
+      0.9
+    ]
+  }
+}

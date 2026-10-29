@@ -128,6 +128,10 @@ inline Json::Value ruleToJson(const Row& r) {
     j["level"] = field(r, "level", "WARNING");
     j["priority"] = toInt(field(r, "priority"), 50);
     j["enabled"] = field(r, "status", "1") == "1";
+    j["scenario"] = field(r, "scenario", "ALL");
+    j["applicableSpotType"] = field(r, "applicable_spot_type", "ALL");
+    const std::string disposalPlan = field(r, "disposal_plan");
+    if (!disposalPlan.empty()) j["disposalPlan"] = disposalPlan;
     return j;
 }
 

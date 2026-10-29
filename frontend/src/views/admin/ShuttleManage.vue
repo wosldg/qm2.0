@@ -9,31 +9,36 @@
     />
 
     <el-card shadow="never" class="table-card">
-      <template #header>
-        <div class="card-header">
-          <span>摆渡车列表</span>
-          <el-button v-if="authStore.isAdmin" type="primary" size="small" @click="openAdd">新增摆渡车</el-button>
-        </div>
-      </template>
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="车辆管理" name="vehicles">
+          <div class="card-header">
+            <span>摆渡车列表</span>
+            <el-button v-if="authStore.isAdmin" type="primary" size="small" @click="openAdd">新增摆渡车</el-button>
+          </div>
 
-      <el-table :data="shuttles" stripe>
-        <el-table-column prop="shuttleId" label="车辆ID" width="110" />
-        <el-table-column prop="name" label="名称" min-width="110" />
-        <el-table-column prop="capacity" label="载客量" width="90" />
-        <el-table-column prop="currentStation" label="当前站点" min-width="110" />
-        <el-table-column prop="passengerCount" label="当前载客" width="90" />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="STATUS_TAG[row.status]">{{ STATUS_TEXT[row.status] }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column v-if="authStore.isAdmin" label="操作" width="140" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-            <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+          <el-table :data="shuttles" stripe>
+            <el-table-column prop="shuttleId" label="车辆ID" width="110" />
+            <el-table-column prop="name" label="名称" min-width="110" />
+            <el-table-column prop="capacity" label="载客量" width="90" />
+            <el-table-column prop="currentStation" label="当前站点" min-width="110" />
+            <el-table-column prop="passengerCount" label="当前载客" width="90" />
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="STATUS_TAG[row.status]">{{ STATUS_TEXT[row.status] }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="authStore.isAdmin" label="操作" width="140" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+                <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+        <el-tab-pane label="路线与距离矩阵" name="routes" lazy>
+          <RouteManage />
+        </el-tab-pane>
+      </el-tabs>
     </el-card>
 
     <el-dialog
@@ -79,11 +84,13 @@ import { useAuthStore } from '@/stores/auth'
 import { usePolling } from '@/composables/usePolling'
 import { getShuttles } from '@/api'
 import type { Shuttle } from '@/api'
+import RouteManage from './RouteManage.vue'
 
 type ShuttleStatus = Shuttle['status']
 
 const authStore = useAuthStore()
 const shuttles = ref<Shuttle[]>([])
+const activeTab = ref('vehicles')
 
 /** 可用站点列表 */
 const STATIONS = ['东门', '索道站', '观瀑台', '百花谷', '望湖亭', '青石古镇', '山顶广场']

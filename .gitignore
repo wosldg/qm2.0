@@ -13,6 +13,17 @@ cmake-build-*/
 # ---- 依赖 ----
 node_modules/
 
+# ONNX Runtime 预编译包（运行/编译必需，随仓库分发）
+!/backend/third_party/onnxruntime/lib/*.lib
+
+# ---- 模型训练产物 ----
+lightning_logs/
+*.pt
+*.ckpt
+__pycache__/
+*.pyc
+offline_tools/sim_scenic_flow_train.csv
+
 # ---- 运行时数据 / 日志 ----
 logs/
 /data/

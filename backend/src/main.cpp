@@ -11,6 +11,7 @@
 #include "pipeline/DataPipeline.h"
 #include "pipeline/SchedulingEngine.h"
 #include "pipeline/SimulationEngine.h"
+#include "predict/Predictor.h"
 #include "security/AuthService.h"
 #include "storage/Database.h"
 #include "storage/Schema.h"
@@ -74,6 +75,12 @@ int main(int argc, char** argv) {
         AuthService::instance().seedUsers();
         loadSettings();
         SimulationEngine::instance().init();
+
+        // TFT forecast model; absence of the model files is not fatal (predict
+        // endpoints report 503 until config/tft_model.onnx is deployed).
+        Predictor::instance().load(base + "/config/tft_model.onnx",
+                                   base + "/config/preprocessing_params.json",
+                                   base + "/config/sim_config.json");
 
         // Background stage workers must be running before the pipeline starts feeding them.
         SchedulingEngine::instance().start();

@@ -1,0 +1,7 @@
+{
+  "best_val_loss": 0.16557110846042633,
+  "epochs_trained": 1,
+  "days_used": 3,
+  "rows_used": 6912,
+  "onnx_exported": true
+}

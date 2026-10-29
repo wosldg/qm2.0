@@ -9,13 +9,24 @@ namespace scenicflow {
 
 struct SimulationConfig {
     double arrivalRate = 45.0;      // visitors per minute for the whole scenic area
-    std::string pattern = "PEAK";   // STEADY / PEAK / RANDOM
+    std::string pattern = "PEAK";   // STEADY / PEAK / RANDOM / GROUP_PATTERN
     int durationMinutes = 120;
+
+    // P1-4: 团客突发模式参数（仅 pattern=GROUP_PATTERN 时生效）
+    // 指定景点在指定时间窗口内的客流脉冲
+    struct GroupConfig {
+        std::string targetSpotId;     // 目标景点 ID（空=全景区）
+        double burstArrivalRate = 200.0;  // 脉冲到达率（人/分钟）
+        int burstDurationMinutes = 10;    // 脉冲持续时间
+        int burstDelayMinutes = 15;       // 从 simulation start 起多少分钟后触发
+    };
+    GroupConfig group;
 };
 
 struct SpotState {
     std::string spotId;
     std::string name;
+    std::string spotType;          // ENTRANCE / PLAZA / TRAIL / VIEWPOINT / SUMMIT / GENERAL
     int capacity = 0;
     int currentVisitors = 0;
     int cumulativeVisitors = 0;

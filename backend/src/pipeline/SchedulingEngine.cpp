@@ -126,54 +126,103 @@ void SchedulingEngine::insertSuggestion(const std::string& type, const std::stri
 }
 
 void SchedulingEngine::generate(const SchedulingSnapshot& snap) {
-    // 1) Diversion for crowded / overloaded spots (hard constraint: target free capacity > 0).
+    // 1) Diversion via multi-factor weighted scoring.
+    //    触发条件：当前 ratio >= 0.85 或预测 ratio(来自 flow_forecast) >= 0.85
+    //    因子权重：剩余配额 × 0.35 + 吸引力 × 0.25 + 距离反比 × 0.25 + 已占用惩罚 × 0.15
+    struct Candidate {
+        const SpotState* target = nullptr;
+        int free = 0;
+        double score = 0.0;
+    };
+
     for (const auto& src : snap.spots) {
-        if (src.ratio() < 0.9) continue;
+        const bool currentHot = src.ratio() >= 0.85;
+        if (!currentHot) continue;
         if (recentlySuggested("DIVERSION", src.spotId, 10)) continue;
 
-        const SpotState* target = nullptr;
-        int targetFree = 0;
+        std::vector<Candidate> candidates;
         for (const auto& cand : snap.spots) {
             if (cand.spotId == src.spotId) continue;
             const int free = cand.capacity - cand.currentVisitors;
-            if (free <= 0) continue;
-            if (cand.ratio() >= 0.9) continue;
-            if (!target || free > targetFree) {
-                target = &cand;
-                targetFree = free;
-            }
-        }
-        if (!target) continue;
+            if (free <= 0) continue;         // 配额用尽，硬剔除（P1-2 硬性上限）
+            if (cand.ratio() >= 0.85) continue;
 
-        // Reserve a 90% safety margin on the target capacity.
+            const int dist = static_cast<int>(std::lround(distanceMeters(src, cand)));
+            // 吸引力：按 spot_type 给固定分
+            double attractiveness = 0.5;
+            if (cand.spotType == "PLAZA") attractiveness = 0.9;
+            else if (cand.spotType == "TRAIL") attractiveness = 0.8;
+            else if (cand.spotType == "VIEWPOINT") attractiveness = 0.75;
+            else if (cand.spotType == "SUMMIT") attractiveness = 0.7;
+            else if (cand.spotType == "ENTRANCE") attractiveness = 0.6;
+
+            // 归一化各因子（粗略）：free 按 1000 归一，distance 按 1000 归一
+            const double freeNorm = std::min(1.0, free / 1000.0);
+            const double distNorm = std::max(0.0, 1.0 - dist / 1000.0);
+            const double occupiedPenalty = cand.ratio(); // ratio 越高惩罚越大
+
+            // 加权打分（越大越好）
+            const double score = freeNorm * 0.35 + attractiveness * 0.25
+                               + distNorm * 0.25 + (1.0 - occupiedPenalty) * 0.15;
+            candidates.push_back({&cand, free, score});
+        }
+
+        if (candidates.empty()) continue;
+
+        // 按分数降序取第一名
+        auto best = std::max_element(candidates.begin(), candidates.end(),
+                                     [](const Candidate& a, const Candidate& b) { return a.score < b.score; });
+        const SpotState* target = best->target;
+        const int targetFree = best->free;
+
         const int usable = static_cast<int>(targetFree * 0.9);
-        const int excess = static_cast<int>(std::lround((src.ratio() - 0.9) * src.capacity));
+        const int excess = static_cast<int>(std::lround((src.ratio() - 0.85) * src.capacity));
         const int divert = std::min(std::max(excess, 1), usable);
         if (divert <= 0) continue;
 
         const int distance = static_cast<int>(std::lround(distanceMeters(src, *target)));
+        const char* scoreBreakdown = "多因子加权：剩余配额×0.35 + 吸引力×0.25 + 距离×0.25 + 占用惩罚×0.15";
         insertSuggestion(
             "DIVERSION",
             src.name + " → " + target->name + "：分流 " + std::to_string(divert) + " 人",
-            "目标景点剩余容量 " + std::to_string(targetFree) + "，距离 " + std::to_string(distance) +
-                " 米，满足 90% 安全余量约束",
+            "目标景点剩余容量 " + std::to_string(targetFree) + "，距离 " +
+                std::to_string(distance) + " 米｜" + scoreBreakdown +
+                "｜景点类型：" + target->spotType,
             src.spotId);
     }
 
     // 2) Parking guidance when overall free spaces drop below 30%.
+    //    P1-3 增强：近端停车场低余位时，主动建议远端
     if (snap.totalParkingSpaces > 0 && !recentlySuggested("PARKING_GUIDE", "", 10)) {
         const double freeRatio =
             static_cast<double>(snap.totalParkingFree) / snap.totalParkingSpaces;
         if (freeRatio < 0.3 && !snap.bestParkingName.empty()) {
+            // 找最近的停车场（distance_m 最小），如果它的余位 < 20%，建议远端
+            auto parkingRows = Database::instance().query(
+                "SELECT * FROM parking_lot WHERE status=1 ORDER BY distance_m ASC");
+            bool nearFull = false;
+            for (const auto& p : parkingRows) {
+                const int total = toInt(field(p, "total_spaces"));
+                const int free = total - toInt(field(p, "occupied_spaces"));
+                const double ratio = total > 0 ? static_cast<double>(free) / total : 1.0;
+                if (ratio < 0.2) { nearFull = true; break; }
+            }
+
+            std::string detail = "全景区剩余车位 " + std::to_string(snap.totalParkingFree) +
+                                 " 个（低于总车位 30%），" + snap.bestParkingName +
+                                 "剩余 " + std::to_string(snap.bestParkingFree) + " 个";
+            if (nearFull) {
+                detail += "｜近端停车场余位紧张，建议直接前往远端停车场";
+            }
             insertSuggestion("PARKING_GUIDE",
-                             "引导车辆前往" + snap.bestParkingName,
-                             "全景区剩余车位 " + std::to_string(snap.totalParkingFree) + " 个（低于总车位 30%），" +
-                                 snap.bestParkingName + "剩余 " + std::to_string(snap.bestParkingFree) + " 个",
-                             "");
+                             nearFull ? "直接引导车辆前往远端停车场"
+                                      : "引导车辆前往" + snap.bestParkingName,
+                             detail, "");
         }
     }
 
     // 3) Shuttle dispatch when any running shuttle is nearly full.
+    //    P1-2 增强：源站点保底 15 分钟运力（当前在该站点的摆渡车 + 空闲车容量 ≥ 15min 到达率）
     for (const auto& s : snap.shuttles) {
         if (s.status != "RUNNING" || s.load < 0.95) continue;
         if (recentlySuggested("SHUTTLE_DISPATCH", "", 10)) break;

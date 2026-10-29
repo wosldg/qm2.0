@@ -116,6 +116,8 @@ export type RuleMetric = 'visitor_ratio' | 'parking_free' | 'shuttle_load' | 'ar
 
 export type RuleOperator = '>' | '>=' | '<' | '<='
 
+export type RuleScenario = 'ALL' | 'WEEKDAY' | 'WEEKEND'
+
 export interface Rule {
   ruleId: number
   spotId: string // '*' 表示适用于全部景点
@@ -126,6 +128,12 @@ export interface Rule {
   level: EventLevel
   priority: number
   enabled: boolean
+  /** 适用场景：全天 / 仅工作日 / 仅周末 */
+  scenario?: RuleScenario
+  /** 适用景点类型（ALL 表示不限） */
+  applicableSpotType?: string
+  /** 处置预案（JSON 数组字符串，如 '["步骤一","步骤二"]'） */
+  disposalPlan?: string
 }
 
 // ==================== 用户管理 ====================

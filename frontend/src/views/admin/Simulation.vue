@@ -1,5 +1,13 @@
 <template>
   <div class="simulation-page">
+    <el-alert
+      type="warning"
+      :closable="false"
+      show-icon
+      title="演示数据源工具"
+      description="本页为联调/演示用途，不在正式菜单中。接入真实闸机数据后请勿在此启动模拟。"
+    />
+
     <el-card shadow="never" class="status-card">
       <template #header>
         <div class="card-header">模拟运行状态</div>
